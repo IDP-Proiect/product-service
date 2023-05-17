@@ -1,5 +1,8 @@
 import express, { Express, Request, Response } from 'express';
 import dotenv from 'dotenv';
+import fs from 'fs'
+process.env.DATABASE_URL = fs.readFileSync('/run/secrets/DATABASE_URL', 'utf8').trim();
+
 import { PrismaClient } from '@prisma/client'
 import axios from 'axios';
 import multer from 'multer';
@@ -10,7 +13,7 @@ const prisma = new PrismaClient()
 dotenv.config();
 
 const app: Express = express();
-const port = process.env.PORT;
+const port = 80;
 const upload = multer();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -21,14 +24,14 @@ interface AuthResponse {
     message: string;
 }
 const validateToken = async (token: string) => {
-    const validation = await axios.post<AuthResponse>('http://localhost:8080/api/validation', {
+    const validation = await axios.post<AuthResponse>(`http://${process.env.AUTH_ADDR}/api/auth/validation`, {
         token: token
     });
     return validation.data;
 }
 
 // Get all colors
-app.get('/api/colors', async (req: Request, res: Response) => {
+app.get('/api/product/colors', async (req: Request, res: Response) => {
     const colors = await prisma.color.findMany();
     return res.json({
         success: true,
@@ -41,7 +44,7 @@ interface GetProductIDParams {
     id: string;
 }
 
-app.get('/api/colors/:id', async (req: Request<GetProductIDParams>, res: Response) => {
+app.get('/api/product/colors/:id', async (req: Request<GetProductIDParams>, res: Response) => {
     const product = await prisma.color.findUnique({
         where: {
             id: req.params.id
@@ -60,7 +63,7 @@ interface CreateColorReqBody {
     price: string;
     quantity: string;
 }
-app.post('/api/colors', upload.single('file'), async (req: Request, res: Response) => {
+app.post('/api/product/colors', upload.single('file'), async (req: Request, res: Response) => {
 
     // Grab form data and file from request
     const metadata = req.body as CreateColorReqBody;
@@ -79,14 +82,18 @@ app.post('/api/colors', upload.single('file'), async (req: Request, res: Respons
 
     // Generate form data with file
     const formData = new FormData();
+    console.log(image_file?.buffer || "empty file")
     formData.append('file', Buffer.from(image_file?.buffer || "empty file"), image_file?.originalname);
     // Upload product image 
-    const uploadResponse = await axios.post('http://localhost:9798/api/insertImage', formData, { headers: formData.getHeaders() }).then(function (response) {
+    const uploadResponse = await axios.post(`http://${process.env.FS_ADDR}/api/insertImage`, formData, { headers: formData.getHeaders() }).then(function (response) {
         console.log(response.data);
         return response.data.data;
     }).catch(function (error) {
         console.log(error);
-        return undefined;
+        res.json({
+            success: true,
+            data: error
+        })
     }
     );
 
@@ -117,7 +124,7 @@ interface ReserveColorReqBody {
     colorId: string;
     quantity: string;
 }
-app.post('/api/reserve', async (req: Request<null, ReserveColorReqBody>, res: Response) => {
+app.post('/api/product/reserve', async (req: Request<null, ReserveColorReqBody>, res: Response) => {
 
     // Try to update the color table and decremet the quantity
     const color = await prisma.color.updateMany({
@@ -152,7 +159,7 @@ interface ReleaseColorReqBody {
     colorId: string;
     quantity: string;
 }
-app.post('/api/release', async (req: Request <null, ReleaseColorReqBody>, res: Response) => {
+app.post('/api/product/release', async (req: Request<null, ReleaseColorReqBody>, res: Response) => {
 
     const quantity_int = parseInt(req.body.quantity);
     if (quantity_int < 0) {
